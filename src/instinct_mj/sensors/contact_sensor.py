@@ -11,16 +11,13 @@ class ForceThresholdContactSensor(ContactSensor):
 
     cfg: ForceThresholdContactSensorCfg
 
-    def _update_air_time_tracking(self) -> None:
+    def _update_air_time_tracking(self, dt: float) -> None:
         assert self._air_time_state is not None
 
         contact_data = self._extract_sensor_data()
         assert contact_data.force is not None
 
-        assert self._data is not None
-        current_time = self._data.time
-        elapsed_time = current_time - self._air_time_state.last_time
-        elapsed_time = elapsed_time.unsqueeze(-1)
+        elapsed_time = dt
 
         is_contact = torch.linalg.vector_norm(contact_data.force, dim=-1) > self.cfg.force_threshold
 
@@ -49,8 +46,6 @@ class ForceThresholdContactSensor(ContactSensor):
             state.current_contact_time + elapsed_time,
             torch.zeros_like(state.current_contact_time),
         )
-
-        state.last_time[:] = current_time
 
 
 @dataclass(kw_only=True)

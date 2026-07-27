@@ -1,7 +1,7 @@
-"""G1 parkour AMP task config factories.
+"""CASBOT_02 parkour AMP task config.
 
-Config is built via factory functions that return a fully-built
-``G1ParkourAmpEnvCfg``.
+Follows the G1 parkour pattern (``g1_parkour_target_amp_cfg.py``),
+adapted for the 23-DOF CASBOT_02 humanoid robot.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import copy
 import math
 import os
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import mujoco
 from mjlab.envs.mdp.actions import JointPositionActionCfg
@@ -31,19 +32,22 @@ from mjlab.sensor import (
     PinholeCameraPatternCfg,
     RayCastSensorCfg,
 )
-from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
 from mjlab.utils.noise import UniformNoiseCfg
-from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mj.envs.mdp as envs_mdp
 import instinct_mj.tasks.parkour.mdp as parkour_mdp
-from instinct_mj.assets.unitree_g1 import (
-    G1_MJCF_PATH,
-    G1_29Dof_TorsoBase_symmetric_augmentation_joint_mapping,
-    G1_29Dof_TorsoBase_symmetric_augmentation_joint_reverse_buf,
-    beyondmimic_action_scale,
-    beyondmimic_g1_29dof_delayed_actuator_cfgs,
+from instinct_mj.assets.casbot_02 import (
+    CASBOT02_INIT_STATE,
+    CASBOT02_LEG_AMP_BODY_NAMES,
+    CASBOT02_LEG_AMP_SYMMETRIC_LINK_MAPPING,
+    CASBOT02_MJCF_PATH,
+    CASBOT02_SYMMETRIC_JOINT_MAPPING,
+    CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF,
+    casbot02_23dof_delayed_actuator_cfgs,
+    casbot02_action_scale,
+    get_casbot02_spec,
 )
+from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from instinct_mj.envs.manager_based_rl_env_cfg import InstinctLabRLEnvCfg
 from instinct_mj.motion_reference.motion_files.amass_motion_cfg import AmassMotionCfg as AmassMotionCfgBase
 from instinct_mj.motion_reference.motion_reference_cfg import MotionReferenceManagerCfg
@@ -61,12 +65,12 @@ from instinct_mj.terrains.terrain_importer_cfg import TerrainImporterCfg as Inst
 from instinct_mj.terrains.virtual_obstacle.edge_cylinder_cfg import GreedyconcatEdgeCylinderCfg
 from instinct_mj.utils.noise import CropAndResizeCfg, DepthNormalizationCfg, GaussianBlurNoiseCfg
 
+if TYPE_CHECKING:
+    pass
+
 __file_dir__ = os.path.dirname(os.path.realpath(__file__))
-# NOTE: Change this to your local parkour dataset root before training / play.
-# Keep `filtered_motion_selection_filepath` under this directory unless you point it elsewhere.
-# Example:
-# _PARKOUR_DATASET_DIR = os.path.expanduser("~/your/path/to/parkour_motion_reference")
-_PARKOUR_DATASET_DIR = os.path.expanduser("~/Desktop/InstinctMJ/Datasets/g1/parkour_motion_reference")
+# NOTE: Change this to your local CASBOT parkour dataset root before training / play.
+_PARKOUR_DATASET_DIR = os.path.expanduser("~/Desktop/InstinctMJ/Datasets/casbot02/parkour_motion_reference")
 
 # ---------------------------------------------------------------------------
 # Motion reference configs
@@ -75,14 +79,12 @@ _PARKOUR_DATASET_DIR = os.path.expanduser("~/Desktop/InstinctMJ/Datasets/g1/park
 
 @dataclass(kw_only=True)
 class AmassMotionCfg(AmassMotionCfgBase):
-    """Parkour AMASS motion buffer config."""
+    """Parkour AMASS motion buffer config for CASBOT_02."""
 
-    # NOTE: Motion files are resolved from `_PARKOUR_DATASET_DIR`.
     path: str = _PARKOUR_DATASET_DIR
     retargetting_func: object | None = None
-    # NOTE: If your filtered motion list uses another filename or location, update it here.
     filtered_motion_selection_filepath: str | None = os.path.join(
-        _PARKOUR_DATASET_DIR, "parkour_motion_without_run.yaml"
+        _PARKOUR_DATASET_DIR, "parkour_motion_without_run.yaml",
     )
     motion_start_from_middle_range: list[float] = field(default_factory=lambda: [0.0, 0.9])
     motion_start_height_offset: float = 0.0
@@ -95,67 +97,54 @@ class AmassMotionCfg(AmassMotionCfgBase):
 motion_reference_cfg = MotionReferenceManagerCfg(
     name="motion_reference",
     entity_name="robot",
-    robot_model_path=G1_MJCF_PATH,
+    robot_model_path=CASBOT02_MJCF_PATH,
     link_of_interests=[
-        "pelvis",
-        "torso_link",
+        "torso",
+        # left leg
+        "leg_l2_link",   # hip roll (thigh)
+        "leg_l4_link",   # knee (shank)
+        "leg_l6_link",   # ankle roll (foot)
+        # right leg
+        "leg_r2_link",
+        "leg_r4_link",
+        "leg_r6_link",
+        # waist
+        "waist_yaw_link",
+        # left arm
         "left_shoulder_roll_link",
-        "right_shoulder_roll_link",
-        "left_elbow_link",
-        "right_elbow_link",
+        "left_elbow_pitch_link",
         "left_wrist_yaw_link",
+        # right arm
+        "right_shoulder_roll_link",
+        "right_elbow_pitch_link",
         "right_wrist_yaw_link",
-        "left_hip_roll_link",
-        "right_hip_roll_link",
-        "left_knee_link",
-        "right_knee_link",
-        "left_ankle_roll_link",
-        "right_ankle_roll_link",
     ],
-    symmetric_augmentation_link_mapping=[0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12],
-    symmetric_augmentation_joint_mapping=list(G1_29Dof_TorsoBase_symmetric_augmentation_joint_mapping),
-    symmetric_augmentation_joint_reverse_buf=list(G1_29Dof_TorsoBase_symmetric_augmentation_joint_reverse_buf),
+    # 14 links: torso(0) + L leg(1-3) + R leg(4-6) + waist(7) + L arm(8-10) + R arm(11-13)
+    symmetric_augmentation_link_mapping=[0, 4, 5, 6, 1, 2, 3, 7, 11, 12, 13, 8, 9, 10],
+    symmetric_augmentation_joint_mapping=list(CASBOT02_SYMMETRIC_JOINT_MAPPING),
+    symmetric_augmentation_joint_reverse_buf=list(CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF),
     frame_interval_s=0.02,
     update_period=0.02,
     num_frames=10,
     motion_buffers={"run_walk": AmassMotionCfg()},
     mp_split_method="Even",
 )
-# ---------------------------------------------------------------------------
-# Shoe spec factory
-# ---------------------------------------------------------------------------
-
-
-def _parkour_g1_with_shoe_spec() -> mujoco.MjSpec:
-    """Build MjSpec for the G1 robot with shoe mesh."""
-    spec = mujoco.MjSpec.from_file(
-        os.path.abspath(f"{__file_dir__}/../../mjcf/g1_29dof_torsoBase_popsicle_with_shoe.xml")
-    )
-    # Remove embedded per-robot lights to avoid localized over-bright spots.
-    for body in spec.bodies:
-        for light in tuple(body.lights):
-            spec.delete(light)
-    return spec
-
 
 # ---------------------------------------------------------------------------
-# G1-specific actuator setup
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Base parkour env builder
+# Scene config
 # ---------------------------------------------------------------------------
 
 
 @dataclass(kw_only=True)
-class G1ParkourSceneCfg(SceneCfg):
-    """Scene configuration for the G1 Parkour task."""
+class Casbot02ParkourSceneCfg(SceneCfg):
+    """Scene configuration for the CASBOT_02 Parkour task."""
 
 
 @dataclass(kw_only=True)
-class G1ParkourAmpEnvCfg(InstinctLabRLEnvCfg):
-    """Dictionary-manager environment configuration for G1 Parkour AMP."""
+class Casbot02ParkourAmpEnvCfg(InstinctLabRLEnvCfg):
+    """Environment configuration for CASBOT_02 Parkour AMP."""
 
-    scene: G1ParkourSceneCfg = field(default_factory=G1ParkourSceneCfg)
+    scene: Casbot02ParkourSceneCfg = field(default_factory=Casbot02ParkourSceneCfg)
     decimation: int = 4
     observations: dict = field(default_factory=dict)
     actions: dict = field(default_factory=dict)
@@ -167,76 +156,89 @@ class G1ParkourAmpEnvCfg(InstinctLabRLEnvCfg):
     monitors: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # All managers are already dicts, no conversion needed!
         pass
 
 
-def instinct_g1_parkour_amp_env_cfg(
+def _build_casbot02_robot_entity() -> EntityCfg:
+    """Build CASBOT_02 robot entity config."""
+    init_state = copy.deepcopy(CASBOT02_INIT_STATE)
+    return EntityCfg(
+        init_state=init_state,
+        spec_fn=get_casbot02_spec,
+        articulation=EntityArticulationInfoCfg(
+            actuators=tuple(copy.deepcopy(act) for act in casbot02_23dof_delayed_actuator_cfgs),
+            soft_joint_pos_limit_factor=0.9,
+        ),
+        sort_actuators=True,
+    )
+
+
+def instinct_casbot02_parkour_amp_env_cfg(
     *,
     play: bool = False,
-    shoe: bool = True,
-) -> G1ParkourAmpEnvCfg:
-    """Build the base G1 parkour AMP environment configuration.
+) -> Casbot02ParkourAmpEnvCfg:
+    """Build the CASBOT_02 parkour AMP environment configuration.
 
     Args:
-      play: If True, apply play-mode overrides (fewer envs, relaxed
-        termination, etc.).
-      shoe: If True, apply shoe-specific adjustments (default is True).
+        play: If True, apply play-mode overrides (fewer envs, relaxed
+            termination, etc.).
 
     Returns:
-      A ``G1ParkourAmpEnvCfg`` instance with parkour settings applied.
+        A ``Casbot02ParkourAmpEnvCfg`` instance.
     """
-    tracking_cfg = unitree_g1_flat_tracking_env_cfg(play=play, has_state_estimation=True)
-    tracking_scene = tracking_cfg.scene
-    cfg = G1ParkourAmpEnvCfg(
-        decimation=tracking_cfg.decimation,
-        scene=G1ParkourSceneCfg(
-            num_envs=tracking_scene.num_envs,
-            env_spacing=tracking_scene.env_spacing,
-            terrain=tracking_scene.terrain,
-            entities=tracking_scene.entities,
-            sensors=tracking_scene.sensors,
-            extent=tracking_scene.extent,
-            spec_fn=tracking_scene.spec_fn,
-        ),
-        observations=tracking_cfg.observations,
-        actions=tracking_cfg.actions,
-        events=tracking_cfg.events,
-        seed=tracking_cfg.seed,
-        sim=tracking_cfg.sim,
-        viewer=tracking_cfg.viewer,
-        episode_length_s=tracking_cfg.episode_length_s,
-        rewards={"rewards": tracking_cfg.rewards},
-        terminations=tracking_cfg.terminations,
-        commands=tracking_cfg.commands,
-        curriculum=tracking_cfg.curriculum,
-        metrics=tracking_cfg.metrics,
-        recorders=tracking_cfg.recorders,
-        is_finite_horizon=tracking_cfg.is_finite_horizon,
-        auto_reset=tracking_cfg.auto_reset,
-        scale_rewards_by_dt=tracking_cfg.scale_rewards_by_dt,
-        monitors={},
-    )
-    cfg.viewer.origin_type = ViewerConfig.OriginType.WORLD
-    cfg.viewer.entity_name = None
-    cfg.viewer.body_name = None
-    cfg.scene.entities["robot"].init_state.pos = (0.0, 0.0, 0.9)
+    # Build robot entity
+    robot_entity = _build_casbot02_robot_entity()
 
-    # Basic settings
-    cfg.scene.num_envs = 4096
-    cfg.scene.env_spacing = 2.5
-    cfg.episode_length_s = 20.0
+    # Build scene
+    scene_cfg = Casbot02ParkourSceneCfg(
+        num_envs=4096,
+        env_spacing=2.5,
+        entities={"robot": robot_entity},
+        sensors=(),
+        spec_fn=None,
+    )
+
+    cfg = Casbot02ParkourAmpEnvCfg(
+        decimation=4,
+        scene=scene_cfg,
+        observations={},
+        actions={
+            "joint_pos": JointPositionActionCfg(
+                entity_name="robot",
+                actuator_names=(".*",),
+                scale=copy.deepcopy(casbot02_action_scale),
+                use_default_offset=True,
+            ),
+        },
+        events={},
+        seed=42,
+        episode_length_s=20.0,
+        rewards={"rewards": {}},
+        terminations={},
+        commands={},
+        curriculum={},
+    )
+
+    # Basic simulation settings
+    cfg.sim.mujoco.timestep = 0.005
     cfg.sim.nconmax = 128
     cfg.sim.njmax = 700
     cfg.sim.contact_sensor_maxmatch = 128
     cfg.sim.mujoco.iterations = 10
     cfg.sim.mujoco.ls_iterations = 20
     cfg.sim.mujoco.ccd_iterations = 128
-    robot_cfg = cfg.scene.entities["robot"]
-    robot_cfg.articulation.actuators = copy.deepcopy(beyondmimic_g1_29dof_delayed_actuator_cfgs)
-    joint_pos_action: JointPositionActionCfg = cfg.actions["joint_pos"]
-    joint_pos_action.scale = copy.deepcopy(beyondmimic_action_scale)
-    # Terrain
+
+    # Viewer
+    cfg.viewer.origin_type = cfg.viewer.OriginType.WORLD
+    cfg.viewer.entity_name = None
+    cfg.viewer.body_name = None
+
+    # Robot init
+    cfg.scene.entities["robot"].init_state.pos = (0.0, 0.0, 0.92)
+
+    # -------------------------------------------------------------------
+    # Terrain (reuse G1's parkour terrain definitions)
+    # -------------------------------------------------------------------
     terrain_gen = copy.deepcopy(ROUGH_TERRAINS_CFG_PLAY if play else ROUGH_TERRAINS_CFG)
     edge_obstacle_cfg = GreedyconcatEdgeCylinderCfg(
         cylinder_radius=0.05,
@@ -258,15 +260,17 @@ def instinct_g1_parkour_amp_env_cfg(
             "edges": edge_obstacle_cfg,
         },
     )
-    # Scene visual style
     cfg.scene.spec_fn = _edit_parkour_scene_spec
-    # Scene sensors
+
+    # -------------------------------------------------------------------
+    # Sensors
+    # -------------------------------------------------------------------
     cfg.scene.sensors = (
         ForceThresholdContactSensorCfg(
             name="contact_forces",
             primary=ContactMatch(
                 mode="body",
-                pattern=("left_ankle_roll_link", "right_ankle_roll_link"),
+                pattern=("leg_l6_link", "leg_r6_link"),
                 entity="robot",
             ),
             fields=("force",),
@@ -277,7 +281,7 @@ def instinct_g1_parkour_amp_env_cfg(
         ),
         ContactSensorCfg(
             name="torso_contact_forces",
-            primary=ContactMatch(mode="body", pattern="torso_link", entity="robot"),
+            primary=ContactMatch(mode="body", pattern="torso", entity="robot"),
             secondary=None,
             fields=("force",),
             reduce="netforce",
@@ -290,7 +294,7 @@ def instinct_g1_parkour_amp_env_cfg(
                 mode="body",
                 pattern=".*",
                 entity="robot",
-                exclude=("left_ankle_roll_link", "right_ankle_roll_link"),
+                exclude=("leg_l6_link", "leg_r6_link"),
             ),
             fields=("force",),
             reduce="netforce",
@@ -300,23 +304,26 @@ def instinct_g1_parkour_amp_env_cfg(
         VolumePointsCfg(
             name="leg_volume_points",
             entity_name="robot",
-            body_names=".*_ankle_roll_link",
+            body_names="leg_l6_link|leg_r6_link",
             points_generator=Grid3dPointsGeneratorCfg(
-                x_min=-0.025,
-                x_max=0.12,
+                # CASBOT_02 foot sole geometry derived from Isaac Lab URDF collision cylinders:
+                # 7 cylinders at (0.035, y, -0.054) spanning y∈[-0.04,0.04],
+                # lengths 0.20–0.26 m along X → sole ~21 cm × 8 cm.
+                x_min=-0.06,
+                x_max=0.14,
                 x_num=10,
-                y_min=-0.03,
-                y_max=0.03,
+                y_min=-0.04,
+                y_max=0.04,
                 y_num=5,
-                z_min=-0.04,
-                z_max=0.0,
+                z_min=-0.09,
+                z_max=-0.04,
                 z_num=2,
             ),
             debug_vis=False,
         ),
         RayCastSensorCfg(
             name="left_height_scanner",
-            frame=ObjRef(type="body", name="left_ankle_roll_link", entity="robot"),
+            frame=ObjRef(type="body", name="leg_l6_link", entity="robot"),
             pattern=GridPatternCfg(resolution=0.12, size=(0.12, 0.0)),
             ray_alignment="yaw",
             max_distance=10.0,
@@ -324,7 +331,7 @@ def instinct_g1_parkour_amp_env_cfg(
         ),
         RayCastSensorCfg(
             name="right_height_scanner",
-            frame=ObjRef(type="body", name="right_ankle_roll_link", entity="robot"),
+            frame=ObjRef(type="body", name="leg_r6_link", entity="robot"),
             pattern=GridPatternCfg(resolution=0.12, size=(0.12, 0.0)),
             ray_alignment="yaw",
             max_distance=10.0,
@@ -332,7 +339,7 @@ def instinct_g1_parkour_amp_env_cfg(
         ),
         NoisyGroupedRayCasterCameraCfg(
             name="camera",
-            frame=ObjRef(type="body", name="torso_link", entity="robot"),
+            frame=ObjRef(type="body", name="torso", entity="robot"),
             pattern=PinholeCameraPatternCfg(
                 width=64,
                 height=36,
@@ -343,18 +350,8 @@ def instinct_g1_parkour_amp_env_cfg(
             vertical_aperture=2 * math.tan(math.radians(58.29) / 2.0),
             ray_alignment="yaw",
             offset=NoisyGroupedRayCasterCameraCfg.OffsetCfg(
-                # G1 Robot head camera nominal pose
-                pos=(
-                    0.0487988662332928,
-                    0.01,
-                    0.4378029937970051,
-                ),
-                rot=(
-                    0.9135367613482678,
-                    0.004363309284746571,
-                    0.4067366430758002,
-                    0.0,
-                ),
+                pos=(0.05, 0.0, 0.45),
+                rot=(0.9135367613482678, 0.004363309284746571, 0.4067366430758002, 0.0),
                 convention="world",
             ),
             data_types=["distance_to_image_plane"],
@@ -374,13 +371,17 @@ def instinct_g1_parkour_amp_env_cfg(
             debug_vis=False,
         ),
     )
+    # Add motion reference sensor
     motion_reference_sensor_cfg = copy.deepcopy(motion_reference_cfg)
     existing_sensors = tuple(
-        sensor_cfg for sensor_cfg in cfg.scene.sensors if sensor_cfg.name != motion_reference_sensor_cfg.name
+        sensor_cfg for sensor_cfg in cfg.scene.sensors
+        if sensor_cfg.name != motion_reference_sensor_cfg.name
     )
     cfg.scene.sensors = existing_sensors + (motion_reference_sensor_cfg,)
 
-    # MDP settings
+    # -------------------------------------------------------------------
+    # Commands — terrain-aware velocity commands
+    # -------------------------------------------------------------------
     cfg.commands = {
         "base_velocity": PoseVelocityCommandCfg(
             entity_name="robot",
@@ -402,18 +403,10 @@ def instinct_g1_parkour_amp_env_cfg(
                 "pyramid_stairs": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "pyramid_stairs_high": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "pyramid_stairs_inv": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-                "pyramid_stairs_inv_high": {
-                    "lin_vel_x": (0.45, 0.8),
-                    "lin_vel_y": (0.0, 0.0),
-                    "ang_vel_z": (-1.0, 1.0),
-                },
+                "pyramid_stairs_inv_high": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "boxes": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "dense_boxes": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-                "hf_pyramid_slope_inv": {
-                    "lin_vel_x": (0.45, 0.8),
-                    "lin_vel_y": (0.0, 0.0),
-                    "ang_vel_z": (-1.0, 1.0),
-                },
+                "hf_pyramid_slope_inv": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
             },
             only_positive_lin_vel_x=True,
             lin_vel_threshold=0.0,
@@ -421,6 +414,10 @@ def instinct_g1_parkour_amp_env_cfg(
             target_dis_threshold=0.4,
         ),
     }
+
+    # -------------------------------------------------------------------
+    # Observations
+    # -------------------------------------------------------------------
     policy_terms = {
         "base_ang_vel": ObservationTermCfg(
             func=envs_mdp.base_ang_vel,
@@ -445,10 +442,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_pos": ObservationTermCfg(
             func=envs_mdp.joint_pos_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    joint_names=".*",
-                ),
+                "asset_cfg": SceneEntityCfg(name="robot", joint_names=".*"),
             },
             noise=UniformNoiseCfg(n_min=-0.01, n_max=0.01),
             history_length=8,
@@ -457,10 +451,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_vel": ObservationTermCfg(
             func=envs_mdp.joint_vel_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    joint_names=".*",
-                ),
+                "asset_cfg": SceneEntityCfg(name="robot", joint_names=".*"),
             },
             noise=UniformNoiseCfg(n_min=-0.5, n_max=0.5),
             scale=0.05,
@@ -512,10 +503,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_pos": ObservationTermCfg(
             func=envs_mdp.joint_pos_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    joint_names=".*",
-                ),
+                "asset_cfg": SceneEntityCfg(name="robot", joint_names=".*"),
             },
             history_length=8,
             flatten_history_dim=True,
@@ -523,10 +511,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_vel": ObservationTermCfg(
             func=envs_mdp.joint_vel_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    joint_names=".*",
-                ),
+                "asset_cfg": SceneEntityCfg(name="robot", joint_names=".*"),
             },
             scale=0.05,
             history_length=8,
@@ -560,7 +545,6 @@ def instinct_g1_parkour_amp_env_cfg(
         concatenate_terms=False,
         enable_corruption=False,
     )
-    cfg.observations.pop("actor", None)
 
     amp_policy_terms = {
         "projected_gravity": ObservationTermCfg(
@@ -572,10 +556,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_pos_rel": ObservationTermCfg(
             func=envs_mdp.joint_pos_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    preserve_order=True,
-                )
+                "asset_cfg": SceneEntityCfg(name="robot", preserve_order=True),
             },
             history_length=10,
             flatten_history_dim=True,
@@ -583,10 +564,7 @@ def instinct_g1_parkour_amp_env_cfg(
         "joint_vel": ObservationTermCfg(
             func=envs_mdp.joint_vel_rel,
             params={
-                "asset_cfg": SceneEntityCfg(
-                    name="robot",
-                    preserve_order=True,
-                )
+                "asset_cfg": SceneEntityCfg(name="robot", preserve_order=True),
             },
             scale=0.05,
             history_length=10,
@@ -655,6 +633,9 @@ def instinct_g1_parkour_amp_env_cfg(
         enable_corruption=False,
     )
 
+    # -------------------------------------------------------------------
+    # Rewards (same structure as G1 parkour, adapted to CASBOT body names)
+    # -------------------------------------------------------------------
     cfg.rewards = {
         "rewards": {
             # ---------- Task rewards ----------
@@ -706,7 +687,7 @@ def instinct_g1_parkour_amp_env_cfg(
                     "sensor_name": "contact_forces",
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                        body_names=("leg_l6_link", "leg_r6_link"),
                     ),
                     "threshold": 1.0,
                 },
@@ -717,7 +698,10 @@ def instinct_g1_parkour_amp_env_cfg(
                 params={
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        joint_names=(".*_hip_yaw_joint", ".*_hip_roll_joint"),
+                        joint_names=(
+                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
+                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
+                        ),
                     )
                 },
             ),
@@ -728,7 +712,12 @@ def instinct_g1_parkour_amp_env_cfg(
                 params={
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        joint_names=(".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"),
+                        joint_names=(
+                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
+                            "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
+                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
+                            "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
+                        ),
                     )
                 },
             ),
@@ -747,7 +736,7 @@ def instinct_g1_parkour_amp_env_cfg(
             "pelvis_orientation_l2": RewardTermCfg(
                 func=parkour_mdp.link_orientation,
                 weight=-3.0,
-                params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")},
+                params={"asset_cfg": SceneEntityCfg("robot", body_names="torso")},
             ),
             "feet_flat_ori": RewardTermCfg(
                 func=parkour_mdp.feet_orientation_contact,
@@ -756,7 +745,7 @@ def instinct_g1_parkour_amp_env_cfg(
                     "sensor_name": "contact_forces",
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                        body_names=("leg_l6_link", "leg_r6_link"),
                     ),
                 },
             ),
@@ -769,9 +758,9 @@ def instinct_g1_parkour_amp_env_cfg(
                     "right_height_scanner_name": "right_height_scanner",
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                        body_names=("leg_l6_link", "leg_r6_link"),
                     ),
-                    "height_offset": 0.035,
+                    "height_offset": 0.054,  # CASBOT sole is ~5.4 cm below ankle roll joint
                 },
             ),
             "feet_close_xy": RewardTermCfg(
@@ -781,7 +770,7 @@ def instinct_g1_parkour_amp_env_cfg(
                     "threshold": 0.12,
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                        body_names=("leg_l6_link", "leg_r6_link"),
                     ),
                     "std": math.sqrt(0.05),
                 },
@@ -792,7 +781,12 @@ def instinct_g1_parkour_amp_env_cfg(
                 params={
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        joint_names=(".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"),
+                        joint_names=(
+                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
+                            "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
+                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
+                            "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
+                        ),
                     ),
                     "normalize_by_stiffness": True,
                 },
@@ -803,7 +797,12 @@ def instinct_g1_parkour_amp_env_cfg(
                 params={
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        joint_names=(".*_shoulder_.*", ".*_elbow_.*", ".*_wrist.*", "waist_.*"),
+                        joint_names=(
+                            "upper_left_1_joint", "upper_left_2_joint", "upper_left_3_joint",
+                            "upper_left_4_joint", "upper_left_5_joint",
+                            "upper_right_1_joint", "upper_right_2_joint", "upper_right_3_joint",
+                            "upper_right_4_joint", "upper_right_5_joint",
+                        ),
                     )
                 },
             ),
@@ -826,8 +825,12 @@ def instinct_g1_parkour_amp_env_cfg(
                 weight=-1.0,
                 params={"sensor_name": "undesired_contact_forces", "threshold": 1.0},
             ),
-        }
+        },
     }
+
+    # -------------------------------------------------------------------
+    # Curriculum
+    # -------------------------------------------------------------------
     cfg.curriculum = {
         "terrain_levels": CurriculumTermCfg(
             func=parkour_mdp.tracking_exp_vel,
@@ -837,6 +840,10 @@ def instinct_g1_parkour_amp_env_cfg(
             },
         ),
     }
+
+    # -------------------------------------------------------------------
+    # Terminations
+    # -------------------------------------------------------------------
     cfg.terminations = {
         "time_out": TerminationTermCfg(func=envs_mdp.time_out, time_out=True),
         "terrain_out_bound": TerminationTermCfg(
@@ -866,6 +873,10 @@ def instinct_g1_parkour_amp_env_cfg(
             },
         ),
     }
+
+    # -------------------------------------------------------------------
+    # Events (domain randomization)
+    # -------------------------------------------------------------------
     cfg.events = {
         "physics_material": EventTermCfg(
             func=parkour_mdp.randomize_rigid_body_material,
@@ -877,7 +888,6 @@ def instinct_g1_parkour_amp_env_cfg(
                 "make_consistent": True,
             },
         ),
-        # reset
         "reset_base": EventTermCfg(
             func=envs_mdp.reset_root_state_uniform,
             mode="reset",
@@ -910,38 +920,19 @@ def instinct_g1_parkour_amp_env_cfg(
         ),
     }
 
-    if shoe:
-        # Replace robot spec with shoe variant
-        robot_cfg_with_shoe = copy.deepcopy(cfg.scene.entities["robot"])
-        robot_cfg_with_shoe.spec_fn = _parkour_g1_with_shoe_spec
-        # Keep the URDF-authored collision setup as-is.
-        # Even though shoe foot collision geoms now carry explicit names, we still
-        # avoid reapplying asset-zoo collision overrides for parity.
-        robot_cfg_with_shoe.collisions = tuple()
-        cfg.scene.entities["robot"] = robot_cfg_with_shoe
-
-        # Adjust leg volume points z-range for shoes
-        leg_volume_points = next(
-            sensor_cfg for sensor_cfg in cfg.scene.sensors if sensor_cfg.name == "leg_volume_points"
-        )
-        leg_volume_points.points_generator.z_min = -0.063
-        leg_volume_points.points_generator.z_max = -0.023
-
-        # Adjust feet_at_plane height offset for shoes
-        cfg.rewards["rewards"]["feet_at_plane"].params["height_offset"] = 0.058
-
+    # -------------------------------------------------------------------
+    # Play-mode overrides
+    # -------------------------------------------------------------------
     if play:
         cfg.scene.num_envs = 10
         cfg.scene.env_spacing = 2.5
         cfg.episode_length_s = 10.0
-
-        # spawn the robot randomly in the grid (instead of their terrain levels)
-        # reduce the number of terrains to save memory
         cfg.scene.terrain.terrain_generator.num_rows = 4
         cfg.scene.terrain.terrain_generator.num_cols = 10
 
         leg_volume_points_sensor = next(
-            sensor_cfg for sensor_cfg in cfg.scene.sensors if sensor_cfg.name == "leg_volume_points"
+            sensor_cfg for sensor_cfg in cfg.scene.sensors
+            if sensor_cfg.name == "leg_volume_points"
         )
         leg_volume_points_sensor.debug_vis = True
 
@@ -954,35 +945,31 @@ def instinct_g1_parkour_amp_env_cfg(
             "position_range": (0.0, 0.0),
             "velocity_range": (0.0, 0.0),
         }
+
     return cfg
 
 
 # ---------------------------------------------------------------------------
-# Public factory functions
+# Public factory function
 # ---------------------------------------------------------------------------
 
 
-def instinct_g1_parkour_amp_final_cfg(
+def instinct_casbot02_parkour_amp_final_cfg(
     *,
     play: bool = False,
-    shoe: bool = True,
-) -> G1ParkourAmpEnvCfg:
-    """Create the final G1 parkour AMP env configuration.
+) -> Casbot02ParkourAmpEnvCfg:
+    """Create the final CASBOT_02 parkour AMP env configuration.
 
     Args:
-      play: If True, apply play-mode overrides (fewer envs, relaxed
-        termination, etc.).
-      shoe: If True, apply shoe-specific adjustments (default is True,
-        matching the original ``G1ParkourEnvCfg``).
+        play: If True, apply play-mode overrides.
 
     Returns:
-      A fully-built ``G1ParkourAmpEnvCfg`` instance.
+        A fully-built ``Casbot02ParkourAmpEnvCfg`` instance.
     """
-    # Build base parkour config (already includes play overrides if requested)
-    cfg = instinct_g1_parkour_amp_env_cfg(play=play, shoe=shoe)
+    cfg = instinct_casbot02_parkour_amp_env_cfg(play=play)
 
-    # Apply play-mode viewer overrides
     if play:
+        from mjlab.viewer.viewer_config import ViewerConfig
         cfg.viewer = ViewerConfig(
             lookat=(0.0, 0.75, 0.0),
             distance=4.123105625617661,
