@@ -9,10 +9,21 @@ videos/
 *.out
 /MUJOCO_LOG.TXT
 
-# Local motion recordings and generated conversion artifacts; keep YAML selections.
+# Ignore new local recordings/artifacts; include the bundled parkour datasets.
 /Datasets/**/*.data
 /Datasets/**/*.npz
 /Datasets/**/conversion_report.json
+!/Datasets/casbot02/CASBOT02_ShangTaiJie_1000HZ.data
+!/Datasets/casbot02/CASBOT02_XiaTaiJie_1000HZ.data
+!/Datasets/casbot02/原地右转.data
+!/Datasets/casbot02/原地左转.data
+!/Datasets/casbot02/直行1步态.data
+!/Datasets/casbot02/parkour_motion_reference/CASBOT02_ShangTaiJie_1000HZ_retargeted.npz
+!/Datasets/casbot02/parkour_motion_reference/CASBOT02_XiaTaiJie_1000HZ_retargeted.npz
+!/Datasets/casbot02/parkour_motion_reference/原地右转_retargeted.npz
+!/Datasets/casbot02/parkour_motion_reference/原地左转_retargeted.npz
+!/Datasets/casbot02/parkour_motion_reference/直行1步态_retargeted.npz
+!/Datasets/g1/parkour_motion_reference/parkour_motion_without_run_retargetted.npz
 
 # Build metadata and generated native artifacts
 build/
