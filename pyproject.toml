@@ -67,7 +67,6 @@ explicit = true
 
 [tool.uv.sources]
 instinct_rl = { git = "https://github.com/project-instinct/instinct_rl.git" }
-mjlab = { path = "../mjlab", editable = true }
 warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
 
 [tool.setuptools]
@@ -78,6 +77,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 instinct_mj = [
+  "assets/resources/casbot_23dof/xml/*.xml",
+  "assets/resources/casbot_23dof/urdf/*.urdf",
+  "assets/resources/casbot_23dof/meshes/*.STL",
   "assets/resources/unitree_g1/*.xml",
   "assets/resources/unitree_g1/xml/*.xml",
   "assets/resources/unitree_g1/urdf/*.urdf",

@@ -11,13 +11,19 @@ class ForceThresholdContactSensor(ContactSensor):
 
     cfg: ForceThresholdContactSensorCfg
 
-    def _update_air_time_tracking(self, dt: float) -> None:
+    def update(self, dt: float) -> None:
+        # mjlab 1.5.0 calls the air-time hook without dt. Keep the exact
+        # substep duration instead of differencing the float32 simulation clock.
+        self._air_time_dt = dt
+        super().update(dt)
+
+    def _update_air_time_tracking(self, dt: float | None = None) -> None:
         assert self._air_time_state is not None
 
         contact_data = self._extract_sensor_data()
         assert contact_data.force is not None
 
-        elapsed_time = dt
+        elapsed_time = self._air_time_dt if dt is None else dt
 
         is_contact = torch.linalg.vector_norm(contact_data.force, dim=-1) > self.cfg.force_threshold
 

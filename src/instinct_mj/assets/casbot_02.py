@@ -5,6 +5,7 @@ Follows the same pattern as ``unitree_g1.py``.
 
 from __future__ import annotations
 
+import copy
 import os
 
 import mujoco
@@ -17,11 +18,30 @@ __file_dir__ = os.path.dirname(os.path.realpath(__file__))
 # MJCF path
 # ---------------------------------------------------------------------------
 
-CASBOT02_MJCF_PATH: str = os.path.join(
-    __file_dir__, "resources/casbot_23dof/xml/CASBOT_02_23dof.xml"
+CASBOT02_MJCF_PATH: str = os.path.join(__file_dir__, "resources/casbot_23dof/xml/CASBOT_02_23dof.xml")
+CASBOT02_MESHES_DIR: str = os.path.join(__file_dir__, "resources/casbot_23dof/meshes")
+CASBOT02_PARKOUR_MJCF_PATH: str = os.path.join(__file_dir__, "resources/casbot_23dof/xml/CASBOT_02_18dof.xml")
+
+# Camera pose and raw FOV match InstinctLab's 18-DOF CASBOT02.
+# Its base_link frame is named torso here; cropping keeps the lower half,
+# matching the RPO/G1 parkour preprocessing.
+CASBOT02_DEPTH_CAMERA_LINK: str = "torso"
+CASBOT02_DEPTH_CAMERA_OFFSET_POS: tuple[float, float, float] = (0.080, 0.0, 0.1495)
+CASBOT02_DEPTH_CAMERA_OFFSET_ROT: tuple[float, float, float, float] = (
+    0.8660254037844387,
+    0.0,
+    0.5,
+    0.0,
 )
-CASBOT02_MESHES_DIR: str = os.path.join(
-    __file_dir__, "resources/casbot_23dof/meshes"
+CASBOT02_DEPTH_CAMERA_FOV_X_DEG: float = 94.0
+CASBOT02_DEPTH_CAMERA_FOV_Y_DEG: float = 68.0
+CASBOT02_DEPTH_CAMERA_CROP_REGION: tuple[int, int, int, int] = (18, 0, 16, 16)
+
+# IsaacLab 18DOF shell URDF: seven cylinders per foot, imported as capsules.
+# Their axes are at Z=-0.054 m with radius 0.01 m, so the sole is at -0.064 m.
+CASBOT02_FOOT_SOLE_HEIGHT: float = 0.064
+CASBOT02_FOOT_GEOM_NAMES: tuple[str, ...] = tuple(
+    f"{side}_foot_collision_{index}" for side in ("left", "right") for index in range(7)
 )
 
 # ---------------------------------------------------------------------------
@@ -32,21 +52,21 @@ CASBOT02_MESHES_DIR: str = os.path.join(
 
 CASBOT02_23DOF_JOINT_NAMES: tuple[str, ...] = (
     # left leg (6)
-    "leg_l1_joint",   # 0  – hip pitch  (axis 0 1 0)
-    "leg_l2_joint",   # 1  – hip roll   (axis 1 0 0)
-    "leg_l3_joint",   # 2  – hip yaw    (axis 0 0 1)
-    "leg_l4_joint",   # 3  – knee pitch (axis 0 1 0)
-    "leg_l5_joint",   # 4  – ankle pitch(axis 0 1 0)
-    "leg_l6_joint",   # 5  – ankle roll (axis 1 0 0)
+    "leg_l1_joint",  # 0  – hip pitch  (axis 0 1 0)
+    "leg_l2_joint",  # 1  – hip roll   (axis 1 0 0)
+    "leg_l3_joint",  # 2  – hip yaw    (axis 0 0 1)
+    "leg_l4_joint",  # 3  – knee pitch (axis 0 1 0)
+    "leg_l5_joint",  # 4  – ankle pitch(axis 0 1 0)
+    "leg_l6_joint",  # 5  – ankle roll (axis 1 0 0)
     # right leg (6)
-    "leg_r1_joint",   # 6  – hip pitch  (axis 0 1 0)
-    "leg_r2_joint",   # 7  – hip roll   (axis 1 0 0)
-    "leg_r3_joint",   # 8  – hip yaw    (axis 0 0 1)
-    "leg_r4_joint",   # 9  – knee pitch (axis 0 1 0)
-    "leg_r5_joint",   # 10 – ankle pitch(axis 0 1 0)
-    "leg_r6_joint",   # 11 – ankle roll (axis 1 0 0)
+    "leg_r1_joint",  # 6  – hip pitch  (axis 0 1 0)
+    "leg_r2_joint",  # 7  – hip roll   (axis 1 0 0)
+    "leg_r3_joint",  # 8  – hip yaw    (axis 0 0 1)
+    "leg_r4_joint",  # 9  – knee pitch (axis 0 1 0)
+    "leg_r5_joint",  # 10 – ankle pitch(axis 0 1 0)
+    "leg_r6_joint",  # 11 – ankle roll (axis 1 0 0)
     # waist (1)
-    "waist_yaw_joint",# 12 – waist yaw  (axis 0 0 1)
+    "waist_yaw_joint",  # 12 – waist yaw  (axis 0 0 1)
     # left arm (5)
     "upper_left_1_joint",  # 13 – shoulder pitch (axis 0 1 0)
     "upper_left_2_joint",  # 14 – shoulder roll  (axis 1 0 0)
@@ -54,11 +74,24 @@ CASBOT02_23DOF_JOINT_NAMES: tuple[str, ...] = (
     "upper_left_4_joint",  # 16 – elbow pitch    (axis 0 1 0)
     "upper_left_5_joint",  # 17 – wrist yaw      (axis 0 0 1)
     # right arm (5)
-    "upper_right_1_joint", # 18 – shoulder pitch (axis 0 1 0)
-    "upper_right_2_joint", # 19 – shoulder roll  (axis 1 0 0)
-    "upper_right_3_joint", # 20 – shoulder yaw   (axis 0 0 1)
-    "upper_right_4_joint", # 21 – elbow pitch    (axis 0 1 0)
-    "upper_right_5_joint", # 22 – wrist yaw      (axis 0 0 1)
+    "upper_right_1_joint",  # 18 – shoulder pitch (axis 0 1 0)
+    "upper_right_2_joint",  # 19 – shoulder roll  (axis 1 0 0)
+    "upper_right_3_joint",  # 20 – shoulder yaw   (axis 0 0 1)
+    "upper_right_4_joint",  # 21 – elbow pitch    (axis 0 1 0)
+    "upper_right_5_joint",  # 22 – wrist yaw      (axis 0 0 1)
+)
+
+# Parkour fixes waist, shoulder yaw, and wrist yaw at zero. Wrist pitch/roll
+# are already fixed bodies in the source model.
+CASBOT02_PARKOUR_FIXED_JOINT_NAMES: tuple[str, ...] = (
+    "waist_yaw_joint",
+    "upper_left_3_joint",
+    "upper_left_5_joint",
+    "upper_right_3_joint",
+    "upper_right_5_joint",
+)
+CASBOT02_PARKOUR_JOINT_NAMES: tuple[str, ...] = tuple(
+    name for name in CASBOT02_23DOF_JOINT_NAMES if name not in CASBOT02_PARKOUR_FIXED_JOINT_NAMES
 )
 
 # ---------------------------------------------------------------------------
@@ -66,10 +99,18 @@ CASBOT02_23DOF_JOINT_NAMES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 CASBOT02_LEG_JOINT_NAMES: tuple[str, ...] = (
-    "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
-    "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
-    "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
-    "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
+    "leg_l1_joint",
+    "leg_l2_joint",
+    "leg_l3_joint",
+    "leg_l4_joint",
+    "leg_l5_joint",
+    "leg_l6_joint",
+    "leg_r1_joint",
+    "leg_r2_joint",
+    "leg_r3_joint",
+    "leg_r4_joint",
+    "leg_r5_joint",
+    "leg_r6_joint",
     "waist_yaw_joint",
 )
 
@@ -79,12 +120,12 @@ CASBOT02_LEG_JOINT_NAMES: tuple[str, ...] = (
 
 CASBOT02_LEG_AMP_BODY_NAMES: tuple[str, ...] = (
     "torso",
-    "leg_l2_link",   # left hip roll link (thigh)
-    "leg_l4_link",   # left knee link (shank)
-    "leg_l6_link",   # left ankle roll link (foot)
-    "leg_r2_link",   # right hip roll link (thigh)
-    "leg_r4_link",   # right knee link (shank)
-    "leg_r6_link",   # right ankle roll link (foot)
+    "leg_l2_link",  # left hip roll link (thigh)
+    "leg_l4_link",  # left knee link (shank)
+    "leg_l6_link",  # left ankle roll link (foot)
+    "leg_r2_link",  # right hip roll link (thigh)
+    "leg_r4_link",  # right knee link (shank)
+    "leg_r6_link",  # right ankle roll link (foot)
     "waist_yaw_link",
 )
 
@@ -93,18 +134,18 @@ CASBOT02_LEG_AMP_BODY_NAMES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 CASBOT02_SYMMETRIC_JOINT_MAPPING: tuple[int, ...] = (
-    6,   # 0  leg_l1 → leg_r1
-    7,   # 1  leg_l2 → leg_r2
-    8,   # 2  leg_l3 → leg_r3
-    9,   # 3  leg_l4 → leg_r4
+    6,  # 0  leg_l1 → leg_r1
+    7,  # 1  leg_l2 → leg_r2
+    8,  # 2  leg_l3 → leg_r3
+    9,  # 3  leg_l4 → leg_r4
     10,  # 4  leg_l5 → leg_r5
     11,  # 5  leg_l6 → leg_r6
-    0,   # 6  leg_r1 → leg_l1
-    1,   # 7  leg_r2 → leg_l2
-    2,   # 8  leg_r3 → leg_l3
-    3,   # 9  leg_r4 → leg_l4
-    4,   # 10 leg_r5 → leg_l5
-    5,   # 11 leg_r6 → leg_l6
+    0,  # 6  leg_r1 → leg_l1
+    1,  # 7  leg_r2 → leg_l2
+    2,  # 8  leg_r3 → leg_l3
+    3,  # 9  leg_r4 → leg_l4
+    4,  # 10 leg_r5 → leg_l5
+    5,  # 11 leg_r6 → leg_l6
     12,  # 12 waist_yaw → self
     18,  # 13 upper_left_1 → upper_right_1
     19,  # 14 upper_left_2 → upper_right_2
@@ -125,29 +166,40 @@ CASBOT02_SYMMETRIC_JOINT_MAPPING: tuple[int, ...] = (
 # ---------------------------------------------------------------------------
 
 CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF: tuple[int, ...] = (
-    1,   # 0  leg_l1 (hip pitch)
+    1,  # 0  leg_l1 (hip pitch)
     -1,  # 1  leg_l2 (hip roll)
     -1,  # 2  leg_l3 (hip yaw)
-    1,   # 3  leg_l4 (knee pitch)
-    1,   # 4  leg_l5 (ankle pitch)
+    1,  # 3  leg_l4 (knee pitch)
+    1,  # 4  leg_l5 (ankle pitch)
     -1,  # 5  leg_l6 (ankle roll)
-    1,   # 6  leg_r1 (hip pitch)
+    1,  # 6  leg_r1 (hip pitch)
     -1,  # 7  leg_r2 (hip roll)
     -1,  # 8  leg_r3 (hip yaw)
-    1,   # 9  leg_r4 (knee pitch)
-    1,   # 10 leg_r5 (ankle pitch)
+    1,  # 9  leg_r4 (knee pitch)
+    1,  # 10 leg_r5 (ankle pitch)
     -1,  # 11 leg_r6 (ankle roll)
     -1,  # 12 waist_yaw (yaw)
-    1,   # 13 upper_left_1 (shoulder pitch)
+    1,  # 13 upper_left_1 (shoulder pitch)
     -1,  # 14 upper_left_2 (shoulder roll)
     -1,  # 15 upper_left_3 (shoulder yaw)
-    1,   # 16 upper_left_4 (elbow pitch)
+    1,  # 16 upper_left_4 (elbow pitch)
     -1,  # 17 upper_left_5 (wrist yaw)
-    1,   # 18 upper_right_1 (shoulder pitch)
+    1,  # 18 upper_right_1 (shoulder pitch)
     -1,  # 19 upper_right_2 (shoulder roll)
     -1,  # 20 upper_right_3 (shoulder yaw)
-    1,   # 21 upper_right_4 (elbow pitch)
+    1,  # 21 upper_right_4 (elbow pitch)
     -1,  # 22 upper_right_5 (wrist yaw)
+)
+
+CASBOT02_PARKOUR_SYMMETRIC_JOINT_MAPPING: tuple[int, ...] = tuple(
+    CASBOT02_PARKOUR_JOINT_NAMES.index(
+        CASBOT02_23DOF_JOINT_NAMES[CASBOT02_SYMMETRIC_JOINT_MAPPING[CASBOT02_23DOF_JOINT_NAMES.index(name)]]
+    )
+    for name in CASBOT02_PARKOUR_JOINT_NAMES
+)
+CASBOT02_PARKOUR_SYMMETRIC_JOINT_REVERSE_BUF: tuple[int, ...] = tuple(
+    CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF[CASBOT02_23DOF_JOINT_NAMES.index(name)]
+    for name in CASBOT02_PARKOUR_JOINT_NAMES
 )
 
 # ---------------------------------------------------------------------------
@@ -175,6 +227,20 @@ def get_casbot02_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(CASBOT02_MJCF_PATH)
 
 
+def get_casbot02_parkour_spec() -> mujoco.MjSpec:
+    """Load the 18-DOF parkour model with waist/shoulder/wrist yaw fixed."""
+    spec = mujoco.MjSpec.from_file(CASBOT02_PARKOUR_MJCF_PATH)
+    # Like amp_mjlab's asset loader, the robot must not bring its own ground plane.
+    # Otherwise a hidden floor remains underneath generated parkour terrain.
+    for geom in list(spec.worldbody.geoms):
+        if geom.type == mujoco.mjtGeom.mjGEOM_PLANE:
+            spec.delete(geom)
+    # Entity adds the configured PD controls; discard the source torque motors.
+    for actuator in list(spec.actuators):
+        spec.delete(actuator)
+    return spec
+
+
 # ---------------------------------------------------------------------------
 # Initial state (standing pose matching the home keyframe)
 # ---------------------------------------------------------------------------
@@ -195,19 +261,24 @@ CASBOT02_INIT_STATE = EntityCfg.InitialStateCfg(
         "leg_r5_joint": -0.175,
         "leg_r6_joint": 0.0,
         "waist_yaw_joint": 0.0,
-        "upper_left_1_joint": 0.0,
-        "upper_left_2_joint": 0.0,
+        "upper_left_1_joint": 0.1,
+        "upper_left_2_joint": 0.2,
         "upper_left_3_joint": 0.0,
-        "upper_left_4_joint": 0.0,
+        "upper_left_4_joint": -0.35,
         "upper_left_5_joint": 0.0,
-        "upper_right_1_joint": 0.0,
-        "upper_right_2_joint": 0.0,
+        "upper_right_1_joint": 0.1,
+        "upper_right_2_joint": -0.2,
         "upper_right_3_joint": 0.0,
-        "upper_right_4_joint": 0.0,
+        "upper_right_4_joint": -0.35,
         "upper_right_5_joint": 0.0,
     },
     joint_vel={".*": 0.0},
 )
+
+CASBOT02_PARKOUR_INIT_STATE = copy.deepcopy(CASBOT02_INIT_STATE)
+CASBOT02_PARKOUR_INIT_STATE.joint_pos = {
+    name: value for name, value in CASBOT02_INIT_STATE.joint_pos.items() if name in CASBOT02_PARKOUR_JOINT_NAMES
+}
 
 # ---------------------------------------------------------------------------
 # Actuator parameters (from casbot02_constants.py, adapted to BuiltinPdActuatorCfg)
@@ -219,7 +290,7 @@ _DAMPING_RATIO = 2.0
 
 
 def _stiffness(armature: float) -> float:
-    return armature * _NATURAL_FREQ ** 2
+    return armature * _NATURAL_FREQ**2
 
 
 def _damping(armature: float) -> float:
@@ -233,8 +304,12 @@ _DELAY_RESET_ONLY_PERIOD = 1_000_000
 
 CASBOT02_DELAYED_LEG_HEAVY = BuiltinPdActuatorCfg(
     target_names_expr=(
-        "leg_l1_joint", "leg_l2_joint", "leg_l4_joint",
-        "leg_r1_joint", "leg_r2_joint", "leg_r4_joint",
+        "leg_l1_joint",
+        "leg_l2_joint",
+        "leg_l4_joint",
+        "leg_r1_joint",
+        "leg_r2_joint",
+        "leg_r4_joint",
     ),
     stiffness=_stiffness(0.07),
     damping=_damping(0.07),
@@ -248,11 +323,15 @@ CASBOT02_DELAYED_LEG_HEAVY = BuiltinPdActuatorCfg(
 
 CASBOT02_DELAYED_LEG_LIGHT = BuiltinPdActuatorCfg(
     target_names_expr=(
-        "leg_l3_joint", "leg_l5_joint", "leg_l6_joint",
-        "leg_r3_joint", "leg_r5_joint", "leg_r6_joint",
+        "leg_l3_joint",
+        "leg_l5_joint",
+        "leg_l6_joint",
+        "leg_r3_joint",
+        "leg_r5_joint",
+        "leg_r6_joint",
     ),
     stiffness=_stiffness(0.029),
-    damping=_damping(0.029),
+    damping=5,
     effort_limit=80.0,
     armature=0.029,
     delay_min_lag=0,
@@ -275,8 +354,12 @@ CASBOT02_DELAYED_WAIST_YAW = BuiltinPdActuatorCfg(
 
 CASBOT02_DELAYED_ARM_HEAVY = BuiltinPdActuatorCfg(
     target_names_expr=(
-        "upper_left_1_joint", "upper_left_2_joint", "upper_left_4_joint",
-        "upper_right_1_joint", "upper_right_2_joint", "upper_right_4_joint",
+        "upper_left_1_joint",
+        "upper_left_2_joint",
+        "upper_left_4_joint",
+        "upper_right_1_joint",
+        "upper_right_2_joint",
+        "upper_right_4_joint",
     ),
     stiffness=_stiffness(0.033),
     damping=_damping(0.033),
@@ -290,8 +373,10 @@ CASBOT02_DELAYED_ARM_HEAVY = BuiltinPdActuatorCfg(
 
 CASBOT02_DELAYED_ARM_LIGHT = BuiltinPdActuatorCfg(
     target_names_expr=(
-        "upper_left_3_joint", "upper_left_5_joint",
-        "upper_right_3_joint", "upper_right_5_joint",
+        "upper_left_3_joint",
+        "upper_left_5_joint",
+        "upper_right_3_joint",
+        "upper_right_5_joint",
     ),
     stiffness=_stiffness(0.0245),
     damping=_damping(0.0245),
@@ -311,6 +396,12 @@ casbot02_23dof_delayed_actuator_cfgs: tuple = (
     CASBOT02_DELAYED_ARM_LIGHT,
 )
 
+casbot02_parkour_delayed_actuator_cfgs: tuple = (
+    CASBOT02_DELAYED_LEG_HEAVY,
+    CASBOT02_DELAYED_LEG_LIGHT,
+    CASBOT02_DELAYED_ARM_HEAVY,
+)
+
 # ---------------------------------------------------------------------------
 # Action scale (0.25 * effort_limit / stiffness, same formula as G1)
 # ---------------------------------------------------------------------------
@@ -324,11 +415,32 @@ for _act in casbot02_23dof_delayed_actuator_cfgs:
     for _name in _act.target_names_expr:
         casbot02_action_scale[_name] = 0.25 * _effort / _stiff
 
+casbot02_parkour_action_scale: dict[str, float] = {
+    name: casbot02_action_scale[name] for name in CASBOT02_PARKOUR_JOINT_NAMES
+}
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 __all__ = [
+    "CASBOT02_DEPTH_CAMERA_CROP_REGION",
+    "CASBOT02_DEPTH_CAMERA_FOV_X_DEG",
+    "CASBOT02_DEPTH_CAMERA_FOV_Y_DEG",
+    "CASBOT02_DEPTH_CAMERA_LINK",
+    "CASBOT02_DEPTH_CAMERA_OFFSET_POS",
+    "CASBOT02_DEPTH_CAMERA_OFFSET_ROT",
+    "CASBOT02_FOOT_SOLE_HEIGHT",
+    "CASBOT02_FOOT_GEOM_NAMES",
+    "CASBOT02_PARKOUR_FIXED_JOINT_NAMES",
+    "CASBOT02_PARKOUR_INIT_STATE",
+    "CASBOT02_PARKOUR_JOINT_NAMES",
+    "CASBOT02_PARKOUR_MJCF_PATH",
+    "CASBOT02_PARKOUR_SYMMETRIC_JOINT_MAPPING",
+    "CASBOT02_PARKOUR_SYMMETRIC_JOINT_REVERSE_BUF",
+    "casbot02_parkour_action_scale",
+    "casbot02_parkour_delayed_actuator_cfgs",
+    "get_casbot02_parkour_spec",
     "CASBOT02_23DOF_JOINT_NAMES",
     "CASBOT02_DELAYED_ARM_HEAVY",
     "CASBOT02_DELAYED_ARM_LIGHT",

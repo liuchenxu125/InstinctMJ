@@ -45,17 +45,24 @@ From the `InstinctMJ` directory:
 # If uv is not installed:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# Enter the cloned repository (adjust this path if needed):
+cd ~/Desktop/InstinctMJ
+
 uv sync
 uv run instinct-list-envs
 ```
 
-That is the normal install path. `uv sync` installs `InstinctMJ`, resolves the locked MuJoCo / MuJoCo Warp stack, and pulls `instinct_rl` from the Git source recorded in `uv.lock`.
+That is the normal install path. `uv sync` installs `InstinctMJ`, installs `mjlab==1.5.0` from PyPI, resolves the locked MuJoCo / MuJoCo Warp stack, and pulls `instinct_rl` from the Git source recorded in `uv.lock`.
 
 Prerequisites:
 
 - Python `3.10` to `3.13` (`requires-python = ">=3.10,<3.14"`).
 - Linux x86_64 or macOS arm64.
-- `mjlab` must be next to this directory as `../mjlab`, because `pyproject.toml` installs it editable from that path.
+- Enough free disk space for PyTorch, CUDA libraries, and the other dependencies.
+
+Run both commands from the directory containing `pyproject.toml`. If `uv sync` fails, fix that error before running `instinct-list-envs`; the command is installed during the sync.
+
+For development against a local `mjlab` checkout, add an editable path source with `uv add --editable ../mjlab`. That checkout must provide the required version (`1.5.0`).
 
 After installation, run training and playback with the `instinct_rl`-style commands:
 
@@ -139,7 +146,7 @@ Pretrained weights:
 Export ONNX for parkour:
 
 ```bash
-uv run instinct-play Instinct-Parkour-Target-Amp-G1-Play-v0 --load-run <run_name> --export-onnx
+uv run instinct-play Instinct-Parkour-Target-Amp-G1-Play-v0 --load-run <run_name> --export-onnx True
 ```
 
 Play parkour with released weights:

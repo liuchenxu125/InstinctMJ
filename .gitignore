@@ -7,6 +7,12 @@ wandb/
 videos/
 *.log
 *.out
+/MUJOCO_LOG.TXT
+
+# Local motion recordings and generated conversion artifacts; keep YAML selections.
+/Datasets/**/*.data
+/Datasets/**/*.npz
+/Datasets/**/conversion_report.json
 
 # Build metadata and generated native artifacts
 build/

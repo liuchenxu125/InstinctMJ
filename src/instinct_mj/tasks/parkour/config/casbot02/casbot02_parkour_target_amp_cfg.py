@@ -1,7 +1,7 @@
 """CASBOT_02 parkour AMP task config.
 
 Follows the G1 parkour pattern (``g1_parkour_target_amp_cfg.py``),
-adapted for the 23-DOF CASBOT_02 humanoid robot.
+adapted for CASBOT_02 with 18 active joints and rigid waist/shoulder/wrist yaw.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import mujoco
+from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers import (
     CurriculumTermCfg,
@@ -37,17 +38,24 @@ from mjlab.utils.noise import UniformNoiseCfg
 import instinct_mj.envs.mdp as envs_mdp
 import instinct_mj.tasks.parkour.mdp as parkour_mdp
 from instinct_mj.assets.casbot_02 import (
-    CASBOT02_INIT_STATE,
+    CASBOT02_DEPTH_CAMERA_CROP_REGION,
+    CASBOT02_DEPTH_CAMERA_FOV_X_DEG,
+    CASBOT02_DEPTH_CAMERA_FOV_Y_DEG,
+    CASBOT02_DEPTH_CAMERA_LINK,
+    CASBOT02_DEPTH_CAMERA_OFFSET_POS,
+    CASBOT02_DEPTH_CAMERA_OFFSET_ROT,
+    CASBOT02_FOOT_SOLE_HEIGHT,
     CASBOT02_LEG_AMP_BODY_NAMES,
     CASBOT02_LEG_AMP_SYMMETRIC_LINK_MAPPING,
-    CASBOT02_MJCF_PATH,
-    CASBOT02_SYMMETRIC_JOINT_MAPPING,
-    CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF,
-    casbot02_23dof_delayed_actuator_cfgs,
-    casbot02_action_scale,
-    get_casbot02_spec,
+    CASBOT02_PARKOUR_INIT_STATE,
+    CASBOT02_PARKOUR_JOINT_NAMES,
+    CASBOT02_PARKOUR_MJCF_PATH,
+    CASBOT02_PARKOUR_SYMMETRIC_JOINT_MAPPING,
+    CASBOT02_PARKOUR_SYMMETRIC_JOINT_REVERSE_BUF,
+    casbot02_parkour_action_scale,
+    casbot02_parkour_delayed_actuator_cfgs,
+    get_casbot02_parkour_spec,
 )
-from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from instinct_mj.envs.manager_based_rl_env_cfg import InstinctLabRLEnvCfg
 from instinct_mj.motion_reference.motion_files.amass_motion_cfg import AmassMotionCfg as AmassMotionCfgBase
 from instinct_mj.motion_reference.motion_reference_cfg import MotionReferenceManagerCfg
@@ -72,6 +80,12 @@ __file_dir__ = os.path.dirname(os.path.realpath(__file__))
 # NOTE: Change this to your local CASBOT parkour dataset root before training / play.
 _PARKOUR_DATASET_DIR = os.path.expanduser("~/Desktop/InstinctMJ/Datasets/casbot02/parkour_motion_reference")
 
+# Keep the original amp_mjlab meshes intact. At 7 cm, the upper-torso mesh
+# exceeds MuJoCo-Warp's per-pair heightfield contact limit in fallen poses.
+# 8/9 cm also overflow in stress checks; 10 cm passes sampled random poses.
+# This affects collision sampling only; terrain mesh generation stays at 7 cm.
+CASBOT02_PARKOUR_HFIELD_RESOLUTION = 0.10
+
 # ---------------------------------------------------------------------------
 # Motion reference configs
 # ---------------------------------------------------------------------------
@@ -84,7 +98,8 @@ class AmassMotionCfg(AmassMotionCfgBase):
     path: str = _PARKOUR_DATASET_DIR
     retargetting_func: object | None = None
     filtered_motion_selection_filepath: str | None = os.path.join(
-        _PARKOUR_DATASET_DIR, "parkour_motion_without_run.yaml",
+        _PARKOUR_DATASET_DIR,
+        "parkour_motion_without_run.yaml",
     )
     motion_start_from_middle_range: list[float] = field(default_factory=lambda: [0.0, 0.9])
     motion_start_height_offset: float = 0.0
@@ -97,13 +112,13 @@ class AmassMotionCfg(AmassMotionCfgBase):
 motion_reference_cfg = MotionReferenceManagerCfg(
     name="motion_reference",
     entity_name="robot",
-    robot_model_path=CASBOT02_MJCF_PATH,
+    robot_model_path=CASBOT02_PARKOUR_MJCF_PATH,
     link_of_interests=[
         "torso",
         # left leg
-        "leg_l2_link",   # hip roll (thigh)
-        "leg_l4_link",   # knee (shank)
-        "leg_l6_link",   # ankle roll (foot)
+        "leg_l2_link",  # hip roll (thigh)
+        "leg_l4_link",  # knee (shank)
+        "leg_l6_link",  # ankle roll (foot)
         # right leg
         "leg_r2_link",
         "leg_r4_link",
@@ -121,8 +136,8 @@ motion_reference_cfg = MotionReferenceManagerCfg(
     ],
     # 14 links: torso(0) + L leg(1-3) + R leg(4-6) + waist(7) + L arm(8-10) + R arm(11-13)
     symmetric_augmentation_link_mapping=[0, 4, 5, 6, 1, 2, 3, 7, 11, 12, 13, 8, 9, 10],
-    symmetric_augmentation_joint_mapping=list(CASBOT02_SYMMETRIC_JOINT_MAPPING),
-    symmetric_augmentation_joint_reverse_buf=list(CASBOT02_SYMMETRIC_JOINT_REVERSE_BUF),
+    symmetric_augmentation_joint_mapping=list(CASBOT02_PARKOUR_SYMMETRIC_JOINT_MAPPING),
+    symmetric_augmentation_joint_reverse_buf=list(CASBOT02_PARKOUR_SYMMETRIC_JOINT_REVERSE_BUF),
     frame_interval_s=0.02,
     update_period=0.02,
     num_frames=10,
@@ -161,12 +176,12 @@ class Casbot02ParkourAmpEnvCfg(InstinctLabRLEnvCfg):
 
 def _build_casbot02_robot_entity() -> EntityCfg:
     """Build CASBOT_02 robot entity config."""
-    init_state = copy.deepcopy(CASBOT02_INIT_STATE)
+    init_state = copy.deepcopy(CASBOT02_PARKOUR_INIT_STATE)
     return EntityCfg(
         init_state=init_state,
-        spec_fn=get_casbot02_spec,
+        spec_fn=get_casbot02_parkour_spec,
         articulation=EntityArticulationInfoCfg(
-            actuators=tuple(copy.deepcopy(act) for act in casbot02_23dof_delayed_actuator_cfgs),
+            actuators=tuple(copy.deepcopy(act) for act in casbot02_parkour_delayed_actuator_cfgs),
             soft_joint_pos_limit_factor=0.9,
         ),
         sort_actuators=True,
@@ -206,7 +221,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
             "joint_pos": JointPositionActionCfg(
                 entity_name="robot",
                 actuator_names=(".*",),
-                scale=copy.deepcopy(casbot02_action_scale),
+                scale=copy.deepcopy(casbot02_parkour_action_scale),
                 use_default_offset=True,
             ),
         },
@@ -221,8 +236,10 @@ def instinct_casbot02_parkour_amp_env_cfg(
 
     # Basic simulation settings
     cfg.sim.mujoco.timestep = 0.005
-    cfg.sim.nconmax = 128
-    cfg.sim.njmax = 700
+    # The shell asset's multi-capsule feet/legs can generate >128 contacts
+    # before the initial reset (199 in the paired Play startup check).
+    cfg.sim.nconmax = 512
+    cfg.sim.njmax = 2048
     cfg.sim.contact_sensor_maxmatch = 128
     cfg.sim.mujoco.iterations = 10
     cfg.sim.mujoco.ls_iterations = 20
@@ -240,6 +257,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
     # Terrain (reuse G1's parkour terrain definitions)
     # -------------------------------------------------------------------
     terrain_gen = copy.deepcopy(ROUGH_TERRAINS_CFG_PLAY if play else ROUGH_TERRAINS_CFG)
+    terrain_gen.hfield_resolution = CASBOT02_PARKOUR_HFIELD_RESOLUTION
     edge_obstacle_cfg = GreedyconcatEdgeCylinderCfg(
         cylinder_radius=0.05,
         min_points=2,
@@ -306,17 +324,15 @@ def instinct_casbot02_parkour_amp_env_cfg(
             entity_name="robot",
             body_names="leg_l6_link|leg_r6_link",
             points_generator=Grid3dPointsGeneratorCfg(
-                # CASBOT_02 foot sole geometry derived from Isaac Lab URDF collision cylinders:
-                # 7 cylinders at (0.035, y, -0.054) spanning y∈[-0.04,0.04],
-                # lengths 0.20–0.26 m along X → sole ~21 cm × 8 cm.
-                x_min=-0.06,
-                x_max=0.14,
+                # Match InstinctLab's CASBOT02 18DOF foot-volume sampling.
+                x_min=-0.025,
+                x_max=0.12,
                 x_num=10,
-                y_min=-0.04,
-                y_max=0.04,
+                y_min=-0.03,
+                y_max=0.03,
                 y_num=5,
-                z_min=-0.09,
-                z_max=-0.04,
+                z_min=-CASBOT02_FOOT_SOLE_HEIGHT - 0.005,
+                z_max=-CASBOT02_FOOT_SOLE_HEIGHT + 0.035,
                 z_num=2,
             ),
             debug_vis=False,
@@ -339,25 +355,25 @@ def instinct_casbot02_parkour_amp_env_cfg(
         ),
         NoisyGroupedRayCasterCameraCfg(
             name="camera",
-            frame=ObjRef(type="body", name="torso", entity="robot"),
+            frame=ObjRef(type="body", name=CASBOT02_DEPTH_CAMERA_LINK, entity="robot"),
             pattern=PinholeCameraPatternCfg(
                 width=64,
                 height=36,
-                fovy=58.29,
+                fovy=CASBOT02_DEPTH_CAMERA_FOV_Y_DEG,
             ),
             focal_length=1.0,
-            horizontal_aperture=2 * math.tan(math.radians(89.51) / 2.0),
-            vertical_aperture=2 * math.tan(math.radians(58.29) / 2.0),
+            horizontal_aperture=2 * math.tan(math.radians(CASBOT02_DEPTH_CAMERA_FOV_X_DEG) / 2.0),
+            vertical_aperture=2 * math.tan(math.radians(CASBOT02_DEPTH_CAMERA_FOV_Y_DEG) / 2.0),
             ray_alignment="yaw",
             offset=NoisyGroupedRayCasterCameraCfg.OffsetCfg(
-                pos=(0.05, 0.0, 0.45),
-                rot=(0.9135367613482678, 0.004363309284746571, 0.4067366430758002, 0.0),
+                pos=CASBOT02_DEPTH_CAMERA_OFFSET_POS,
+                rot=CASBOT02_DEPTH_CAMERA_OFFSET_ROT,
                 convention="world",
             ),
             data_types=["distance_to_image_plane"],
             depth_clipping_behavior="max",
             noise_pipeline={
-                "crop_and_resize": CropAndResizeCfg(crop_region=(18, 0, 16, 16)),
+                "crop_and_resize": CropAndResizeCfg(crop_region=CASBOT02_DEPTH_CAMERA_CROP_REGION),
                 "gaussian_blur": GaussianBlurNoiseCfg(kernel_size=3, sigma=1),
                 "depth_normalization": DepthNormalizationCfg(
                     depth_range=(0.0, 2.5),
@@ -374,8 +390,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
     # Add motion reference sensor
     motion_reference_sensor_cfg = copy.deepcopy(motion_reference_cfg)
     existing_sensors = tuple(
-        sensor_cfg for sensor_cfg in cfg.scene.sensors
-        if sensor_cfg.name != motion_reference_sensor_cfg.name
+        sensor_cfg for sensor_cfg in cfg.scene.sensors if sensor_cfg.name != motion_reference_sensor_cfg.name
     )
     cfg.scene.sensors = existing_sensors + (motion_reference_sensor_cfg,)
 
@@ -403,7 +418,11 @@ def instinct_casbot02_parkour_amp_env_cfg(
                 "pyramid_stairs": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "pyramid_stairs_high": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "pyramid_stairs_inv": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
-                "pyramid_stairs_inv_high": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
+                "pyramid_stairs_inv_high": {
+                    "lin_vel_x": (0.45, 0.8),
+                    "lin_vel_y": (0.0, 0.0),
+                    "ang_vel_z": (-1.0, 1.0),
+                },
                 "boxes": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "dense_boxes": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
                 "hf_pyramid_slope_inv": {"lin_vel_x": (0.45, 0.8), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (-1.0, 1.0)},
@@ -673,7 +692,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
             ),
             "feet_air_time": RewardTermCfg(
                 func=parkour_mdp.feet_air_time,
-                weight=0.5,
+                weight=1.0,
                 params={
                     "command_name": "base_velocity",
                     "sensor_name": "contact_forces",
@@ -699,8 +718,10 @@ def instinct_casbot02_parkour_amp_env_cfg(
                     "asset_cfg": SceneEntityCfg(
                         "robot",
                         joint_names=(
-                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
-                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
+                            "leg_l2_joint",
+                            "leg_l3_joint",
+                            "leg_r2_joint",
+                            "leg_r3_joint",
                         ),
                     )
                 },
@@ -713,10 +734,18 @@ def instinct_casbot02_parkour_amp_env_cfg(
                     "asset_cfg": SceneEntityCfg(
                         "robot",
                         joint_names=(
-                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
-                            "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
-                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
-                            "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
+                            "leg_l1_joint",
+                            "leg_l2_joint",
+                            "leg_l3_joint",
+                            "leg_l4_joint",
+                            "leg_l5_joint",
+                            "leg_l6_joint",
+                            "leg_r1_joint",
+                            "leg_r2_joint",
+                            "leg_r3_joint",
+                            "leg_r4_joint",
+                            "leg_r5_joint",
+                            "leg_r6_joint",
                         ),
                     )
                 },
@@ -760,7 +789,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
                         "robot",
                         body_names=("leg_l6_link", "leg_r6_link"),
                     ),
-                    "height_offset": 0.054,  # CASBOT sole is ~5.4 cm below ankle roll joint
+                    "height_offset": CASBOT02_FOOT_SOLE_HEIGHT,
                 },
             ),
             "feet_close_xy": RewardTermCfg(
@@ -782,10 +811,18 @@ def instinct_casbot02_parkour_amp_env_cfg(
                     "asset_cfg": SceneEntityCfg(
                         "robot",
                         joint_names=(
-                            "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
-                            "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
-                            "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
-                            "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
+                            "leg_l1_joint",
+                            "leg_l2_joint",
+                            "leg_l3_joint",
+                            "leg_l4_joint",
+                            "leg_l5_joint",
+                            "leg_l6_joint",
+                            "leg_r1_joint",
+                            "leg_r2_joint",
+                            "leg_r3_joint",
+                            "leg_r4_joint",
+                            "leg_r5_joint",
+                            "leg_r6_joint",
                         ),
                     ),
                     "normalize_by_stiffness": True,
@@ -797,12 +834,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
                 params={
                     "asset_cfg": SceneEntityCfg(
                         "robot",
-                        joint_names=(
-                            "upper_left_1_joint", "upper_left_2_joint", "upper_left_3_joint",
-                            "upper_left_4_joint", "upper_left_5_joint",
-                            "upper_right_1_joint", "upper_right_2_joint", "upper_right_3_joint",
-                            "upper_right_4_joint", "upper_right_5_joint",
-                        ),
+                        joint_names=tuple(name for name in CASBOT02_PARKOUR_JOINT_NAMES if name.startswith("upper_")),
                     )
                 },
             ),
@@ -879,13 +911,15 @@ def instinct_casbot02_parkour_amp_env_cfg(
     # -------------------------------------------------------------------
     cfg.events = {
         "physics_material": EventTermCfg(
-            func=parkour_mdp.randomize_rigid_body_material,
+            # Use the decorated mjlab term so friction is expanded per world,
+            # rather than writing different samples into a shared model field.
+            func=envs_mdp.dr.geom_friction,
             mode="startup",
             params={
                 "asset_cfg": SceneEntityCfg("robot", geom_names=".*"),
-                "static_friction_range": (0.3, 1.6),
-                "dynamic_friction_range": (0.3, 1.6),
-                "make_consistent": True,
+                "ranges": (0.3, 1.6),
+                "operation": "abs",
+                "shared_random": True,
             },
         ),
         "reset_base": EventTermCfg(
@@ -920,6 +954,74 @@ def instinct_casbot02_parkour_amp_env_cfg(
         ),
     }
 
+    if not play:
+        # Match HANDOFF's mass/COM/gain ranges; include arms in PD randomization.
+        # body_mass intentionally changes mass only, as in that validated setup.
+        # COM ranges come from HANDOFF's inherited make_velocity_env_cfg.
+        cfg.events.update(
+            {
+                "base_mass": EventTermCfg(
+                    mode="startup",
+                    func=envs_mdp.dr.body_mass,
+                    params={
+                        "asset_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+                        "ranges": (-4.0, 4.0),
+                        "operation": "add",
+                        "distribution": "uniform",
+                    },
+                ),
+                "non_base_mass": EventTermCfg(
+                    mode="startup",
+                    func=envs_mdp.dr.body_mass,
+                    params={
+                        "asset_cfg": SceneEntityCfg("robot", body_names=(r"^(?!torso$).+$",)),
+                        "ranges": (0.8, 1.2),
+                        "operation": "scale",
+                        "distribution": "uniform",
+                        "shared_random": False,
+                    },
+                ),
+                "base_com": EventTermCfg(
+                    mode="startup",
+                    func=envs_mdp.dr.body_com_offset,
+                    params={
+                        "asset_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+                        "ranges": {0: (-0.025, 0.025), 1: (-0.025, 0.025), 2: (-0.03, 0.03)},
+                        "operation": "add",
+                        "distribution": "uniform",
+                    },
+                ),
+                "actuator_gains": EventTermCfg(
+                    mode="startup",
+                    func=envs_mdp.dr.pd_gains,
+                    params={
+                        # LEG_HEAVY, LEG_LIGHT, ARM_HEAVY: 12 leg + 6 arm joints.
+                        "asset_cfg": SceneEntityCfg("robot", actuator_ids=[0, 1, 2]),
+                        "kp_range": (0.85, 1.15),
+                        "kd_range": (0.85, 1.15),
+                        "operation": "scale",
+                        "distribution": "uniform",
+                    },
+                ),
+                "camera_installation": EventTermCfg(
+                    mode="startup",
+                    func=envs_mdp.randomize_camera_offsets,
+                    params={
+                        "asset_cfg": SceneEntityCfg("camera"),
+                        "offset_pose_ranges": {
+                            "x": (-0.03, 0.03),
+                            "y": (-0.03, 0.03),
+                            "z": (-0.03, 0.03),
+                            "roll": (-math.radians(3), math.radians(3)),
+                            "pitch": (-math.radians(3), math.radians(3)),
+                            "yaw": (-math.radians(3), math.radians(3)),
+                        },
+                        "distribution": "uniform",
+                    },
+                ),
+            }
+        )
+
     # -------------------------------------------------------------------
     # Play-mode overrides
     # -------------------------------------------------------------------
@@ -931,8 +1033,7 @@ def instinct_casbot02_parkour_amp_env_cfg(
         cfg.scene.terrain.terrain_generator.num_cols = 10
 
         leg_volume_points_sensor = next(
-            sensor_cfg for sensor_cfg in cfg.scene.sensors
-            if sensor_cfg.name == "leg_volume_points"
+            sensor_cfg for sensor_cfg in cfg.scene.sensors if sensor_cfg.name == "leg_volume_points"
         )
         leg_volume_points_sensor.debug_vis = True
 
@@ -970,6 +1071,7 @@ def instinct_casbot02_parkour_amp_final_cfg(
 
     if play:
         from mjlab.viewer.viewer_config import ViewerConfig
+
         cfg.viewer = ViewerConfig(
             lookat=(0.0, 0.75, 0.0),
             distance=4.123105625617661,

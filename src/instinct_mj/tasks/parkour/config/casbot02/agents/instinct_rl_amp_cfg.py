@@ -1,6 +1,6 @@
 """CASBOT_02 parkour AMP RL config.
 
-Follows G1's ``instinct_rl_amp_cfg.py``, adapted for 23-DOF CASBOT_02.
+Follows G1's ``instinct_rl_amp_cfg.py``, adapted for 18 active CASBOT_02 joints.
 """
 
 from dataclasses import dataclass, field
@@ -23,9 +23,7 @@ class DepthEncoderConv2dCfg(InstinctRlConv2dHeadCfg):
     paddings: list = field(default_factory=lambda: [1])
     nonlinearity: str = "ReLU"
     use_maxpool: bool = True
-    component_names: list = field(
-        default_factory=lambda: ["depth_image"]
-    )
+    component_names: list = field(default_factory=lambda: ["depth_image"])
 
 
 @dataclass(kw_only=True)
@@ -86,7 +84,7 @@ class Casbot02ParkourPPORunnerCfg(InstinctRlOnPolicyRunnerCfg):
     policy_observation_group: str = "policy"
     critic_observation_group: str = "critic"
     max_iterations: int = 30000
-    save_interval: int = 5000
+    save_interval: int = 1000
     experiment_name: str = "casbot02_parkour"
     resume: bool = False
     load_run: str = "^(?!_play$).*"
